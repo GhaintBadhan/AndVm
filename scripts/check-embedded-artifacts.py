@@ -103,6 +103,41 @@ import magisk_image  # noqa: E402
 import release_artifact  # noqa: E402
 import release_inputs  # noqa: E402
 
+# The accepted Android release was produced with the standard-library Magisk
+# verifier. On macOS, Python's liblzma can reject valid Magisk XZ dictionaries
+# with a misleading options error. Keep this host-only decoder in the artifact
+# checker: magisk_image.py remains byte-for-byte the accepted producer input.
+import shutil
+import subprocess
+
+
+def host_xz_decode(data: bytes, error, limit: int = magisk_image.MAX_DECODED_MEMBER) -> bytes:
+    decoder = shutil.which("xz")
+    if decoder is None:
+        raise error("the host xz decoder is required to verify Magisk ramdisk members")
+    try:
+        result = subprocess.run(
+            [decoder, "--format=xz", "--decompress", "--stdout",
+             f"--memlimit-decompress={magisk_image.MAX_XZ_MEMORY}"],
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+    except OSError as failure:
+        raise error(f"cannot start the host xz decoder: {failure}") from failure
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise error(
+            f"xz member does not decode within the {magisk_image.MAX_XZ_MEMORY}-byte "
+            f"memory limit: {detail}"
+        )
+    if len(result.stdout) > limit:
+        raise error("xz member decodes to more than its limit")
+    return result.stdout
+
+
+# Only the release-verification process uses this host decoder. The Android
+# release producer and its accepted source/provenance remain unchanged.
+magisk_image.xz_decode = host_xz_decode
+
 DECISION_ENV = "PENDING_INPUTS_DECISION"
 ANDROID_DESCRIPTOR = "android/lineage-24/metadata/accepted-release.env"
 INPUT_TREES_KEY = "LINEAGE24_ACCEPTED_INPUT_TREES"

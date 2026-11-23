@@ -13,8 +13,8 @@ front of the stock init: it replaces /init, keeps the stock one as
 `.backup/init.xz`, adds `overlay.d/sbin/{magisk,init-ld}.xz` and a `.backup`
 directory with the patch flags, the stock image's SHA-1 and the list of added
 entries, and compresses the ramdisk as lz4 legacy. The check decodes both
-ramdisks with the host XZ decoder and compares them entry by entry. The host decoder
-supports the full XZ filter set used by the pinned Magisk APK. Each caller passes its own
+ramdisks with the standard library and compares them entry by entry, so it runs
+wherever Python does and needs none of Magisk's tools. Each caller passes its own
 error type, as android_image.py's readers do.
 """
 
@@ -28,10 +28,8 @@ import json
 import lzma
 import os
 import re
-import shutil
 import stat
 import struct
-import subprocess
 import sys
 import zipfile
 import zlib
@@ -117,10 +115,10 @@ LZ4_LEGACY_BLOCK = 8 * 1024 * 1024
 MAX_RAMDISK = 256 * 1024 * 1024
 MAX_DECODED_MEMBER = 64 * 1024 * 1024
 # The most a legacy block's compressed form can be (LZ4_compressBound of one
-# chunk), the bounded memory an xz decoder may use (accepted Magisk ramdisk
-# members can use dictionaries larger than 64 MiB), and input-size limits.
+# chunk), the memory an xz decoder may use (a real member needs 16 MiB) and how
+# large a boot image partition or an APK file may be before it is read.
 LZ4_COMPRESS_BOUND = LZ4_LEGACY_BLOCK + LZ4_LEGACY_BLOCK // 255 + 16
-MAX_XZ_MEMORY = 256 * 1024 * 1024
+MAX_XZ_MEMORY = 64 * 1024 * 1024
 MAX_BOOT_IMAGE = 64 * 1024 * 1024
 MAX_APK_FILE = 128 * 1024 * 1024
 MAX_MANIFEST = 16 * 1024 * 1024
@@ -576,32 +574,17 @@ def lz4_legacy_decode(data: bytes, error: Error, limit: int = MAX_RAMDISK) -> by
 
 
 def xz_decode(data: bytes, error: Error, limit: int = MAX_DECODED_MEMBER) -> bytes:
-    """Decode XZ with the host decoder, bounding dictionary memory and output size."""
-    decoder = shutil.which("xz")
-    if decoder is None:
-        raise error("the host xz decoder is required to verify Magisk ramdisk members")
+    """Decode a whole xz stream, refusing trailing data and an oversized result."""
+    decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=MAX_XZ_MEMORY)
     try:
-        result = subprocess.run(
-            [
-                decoder,
-                "--format=xz",
-                "--decompress",
-                "--stdout",
-                f"--memlimit-decompress={MAX_XZ_MEMORY}",
-            ],
-            input=data,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-    except OSError as failure:
-        raise error(f"cannot start the host xz decoder: {failure}") from failure
-    if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip()
-        raise error(f"xz member does not decode within the {MAX_XZ_MEMORY}-byte memory limit: {detail}")
-    if len(result.stdout) > limit:
+        out = decoder.decompress(data, max_length=limit + 1)
+    except lzma.LZMAError as failure:
+        raise error(f"xz member does not decode (or needs more than {MAX_XZ_MEMORY} bytes of memory): {failure}") from failure
+    if len(out) > limit:
         raise error("xz member decodes to more than its limit")
-    return result.stdout
+    if not decoder.eof or decoder.unused_data:
+        raise error("xz member is truncated or has trailing data")
+    return out
 
 
 NEWC_MAGIC = b"070701"
