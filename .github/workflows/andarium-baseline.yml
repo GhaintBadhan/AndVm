@@ -207,6 +207,7 @@ jobs:
           cd .build/foundation-bundle
           shasum -a 256 andarium-foundation.tar.gz.part-* > SHA256SUMS
           shasum -a 256 andarium-foundation.tar.gz > archive.sha256
+          rm andarium-foundation.tar.gz
           printf '{\n  "schema": 1,\n  "tag": "%s",\n  "source_hash": "%s",\n  "xcode_hash": "%s",\n  "source_commit": "%s"\n}\n' \
             "$TAG" "$FOUNDATION_SOURCE_HASH" "$XCODE_HASH" "$GITHUB_SHA" > manifest.json
 
