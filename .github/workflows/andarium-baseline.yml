@@ -48,8 +48,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew install cmake ninja gettext autoconf automake libtool gperf pkg-config groff
+          brew install cmake ninja gettext autoconf automake libtool gperf pkg-config groff xz
           echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix xz)/bin" >> "$GITHUB_PATH"
+          xz --version
           mkdir -p .build
           python3 -m venv .build/tools-venv
           .build/tools-venv/bin/pip install --upgrade pip
