@@ -14,9 +14,40 @@ from __future__ import annotations
 __import__("sys").dont_write_bytecode = True
 
 import argparse
+import shutil
+import subprocess
 from pathlib import Path
 
 import magisk_image
+
+
+# This is a host-side verifier, not part of the Android image producer.
+# Use the system xz decoder for Magisk members whose valid dictionary size
+# exceeds the limit supported by macOS Python's bundled liblzma.
+def _host_xz_decode(data: bytes, error, limit: int = magisk_image.MAX_DECODED_MEMBER) -> bytes:
+    decoder = shutil.which("xz")
+    if decoder is None:
+        raise error("the host xz decoder is required to verify Magisk ramdisk members")
+    try:
+        result = subprocess.run(
+            [decoder, "--format=xz", "--decompress", "--stdout",
+             f"--memlimit-decompress={magisk_image.MAX_XZ_MEMORY}"],
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+    except OSError as failure:
+        raise error(f"cannot start the host xz decoder: {failure}") from failure
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise error(
+            f"xz member does not decode within the {magisk_image.MAX_XZ_MEMORY}-byte "
+            f"memory limit: {detail}"
+        )
+    if len(result.stdout) > limit:
+        raise error("xz member decodes to more than its limit")
+    return result.stdout
+
+
+magisk_image.xz_decode = _host_xz_decode
 
 
 def error(message: str) -> SystemExit:
