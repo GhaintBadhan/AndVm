@@ -15,6 +15,35 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools/aot"))
 
+import magisk_image  # noqa: E402
+
+# This installer is a host-side verifier of an already-published release.
+# macOS Python's liblzma rejects valid Magisk XZ dictionaries; use the host
+# xz decoder here without changing the producer's shared, provenance-pinned
+# magisk_image.py implementation.
+def _host_xz_decode(data: bytes, error, limit: int = magisk_image.MAX_DECODED_MEMBER) -> bytes:
+    decoder = shutil.which("xz")
+    if decoder is None:
+        raise error("the host xz decoder is required to verify Magisk ramdisk members")
+    try:
+        result = __import__("subprocess").run(
+            [decoder, "--format=xz", "--decompress", "--stdout",
+             f"--memlimit-decompress={magisk_image.MAX_XZ_MEMORY}"],
+            input=data, stdout=__import__("subprocess").PIPE,
+            stderr=__import__("subprocess").PIPE, check=False,
+        )
+    except OSError as failure:
+        raise error(f"cannot start the host xz decoder: {failure}") from failure
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise error(f"xz member does not decode within the {magisk_image.MAX_XZ_MEMORY}-byte memory limit: {detail}")
+    if len(result.stdout) > limit:
+        raise error("xz member decodes to more than its limit")
+    return result.stdout
+
+
+magisk_image.xz_decode = _host_xz_decode
+
 import release_artifact  # noqa: E402
 from release_common import (  # noqa: E402
     fail,
