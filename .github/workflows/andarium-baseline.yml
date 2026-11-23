@@ -76,6 +76,9 @@ jobs:
           UML_IOS_ZSTD_DEPENDENCY_JOBS: "2"
         run: |
           set -euo pipefail
+          source .build/tools-venv/bin/activate
+          python -m pip install packaging
+          python -c "import mako, packaging, yaml; print('Python build modules verified')"
           dependencies/build-apple-gpu.sh --platform ios
           dependencies/build-ios-network.sh --platform ios
           dependencies/build-ios-storage.sh
