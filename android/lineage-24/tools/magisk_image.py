@@ -115,10 +115,10 @@ LZ4_LEGACY_BLOCK = 8 * 1024 * 1024
 MAX_RAMDISK = 256 * 1024 * 1024
 MAX_DECODED_MEMBER = 64 * 1024 * 1024
 # The most a legacy block's compressed form can be (LZ4_compressBound of one
-# chunk), the memory an xz decoder may use (a real member needs 16 MiB) and how
-# large a boot image partition or an APK file may be before it is read.
+# chunk), the bounded memory an xz decoder may use (accepted Magisk ramdisk
+# members can use dictionaries larger than 64 MiB), and input-size limits.
 LZ4_COMPRESS_BOUND = LZ4_LEGACY_BLOCK + LZ4_LEGACY_BLOCK // 255 + 16
-MAX_XZ_MEMORY = 64 * 1024 * 1024
+MAX_XZ_MEMORY = 256 * 1024 * 1024
 MAX_BOOT_IMAGE = 64 * 1024 * 1024
 MAX_APK_FILE = 128 * 1024 * 1024
 MAX_MANIFEST = 16 * 1024 * 1024
