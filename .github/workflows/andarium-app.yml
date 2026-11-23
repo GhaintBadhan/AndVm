@@ -38,31 +38,43 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           echo "xcode=$(xcodebuild -version | tr '\n' '-')" >> "$GITHUB_OUTPUT"
+          echo "xcode_hash=$(xcodebuild -version | shasum -a 256 | cut -c1-12)" >> "$GITHUB_OUTPUT"
           test "$(uname -m)" = arm64
           python3 --version
 
-      # This exact key is shared with the foundation workflow. A miss is a
-      # hard stop: app builds must never silently rebuild Android or runtimes.
-      - name: Restore verified foundation bundle
-        id: foundation
-        uses: actions/cache@v4
-        with:
-          path: |
-            .build/dependencies
-            .build/kernel/artifacts
-            .build/android/releases
-            .build/android/aot
-            .build/kernarium-runtime-ios-device-android-4k
-            .build/kernarium-xcframeworks
-            .build/andarium-system
-          key: andarium-foundation-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'Kernarium/**', 'dependencies/**', 'kernel/**', 'android/lineage-24/**', 'scripts/check-embedded-artifacts.py', 'Andarium/scripts/stage-system-image.py') }}
-
-      - name: Stop if the foundation bundle is missing
-        if: steps.foundation.outputs.cache-hit != 'true'
+      # Download the immutable, versioned foundation from this repository's
+      # Releases. This works on a completely fresh hosted runner; no cache hit
+      # or previous runner disk is required.
+      - name: Download and verify foundation release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FOUNDATION_SOURCE_HASH: ${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'Kernarium/**', 'dependencies/**', 'kernel/**', 'android/lineage-24/**', 'scripts/check-embedded-artifacts.py', 'Andarium/scripts/stage-system-image.py') }}
+          XCODE_HASH: ${{ steps.toolchain.outputs.xcode_hash }}
         run: |
-          echo "::error::No matching verified foundation bundle exists for this source and Xcode toolchain. Run the Andarium foundation workflow first."
-          exit 1
+          set -euo pipefail
+          TAG="andarium-foundation-${XCODE_HASH}-${FOUNDATION_SOURCE_HASH}"
+          mkdir -p .build/foundation-download
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir .build/foundation-download
+          cd .build/foundation-download
+          test -f manifest.json
+          test -f SHA256SUMS
+          test -f archive.sha256
+          python3 - "$TAG" "$FOUNDATION_SOURCE_HASH" "$XCODE_HASH" <<'PY'
+          import json, sys
+          with open("manifest.json", encoding="utf-8") as f:
+              manifest = json.load(f)
+          expected = {"tag": sys.argv[1], "source_hash": sys.argv[2], "xcode_hash": sys.argv[3]}
+          for key, value in expected.items():
+              if manifest.get(key) != value:
+                  raise SystemExit(f"Foundation manifest mismatch for {key}")
+          print("Foundation manifest matches source and Xcode fingerprints")
+          PY
+          shasum -a 256 -c SHA256SUMS
+          cat andarium-foundation.tar.gz.part-* > andarium-foundation.tar.gz
+          shasum -a 256 -c archive.sha256
+          tar -xzf andarium-foundation.tar.gz -C "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
 
       - name: Verify restored foundation artifacts
         shell: bash
