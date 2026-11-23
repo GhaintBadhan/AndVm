@@ -8,6 +8,7 @@ on:
       - .github/workflows/andarium-baseline.yml
       - android/lineage-24/tools/magisk_image.py
       - android/lineage-24/tools/install-release.py
+      - android/lineage-24/tools/verify-magisk-boot.py
   workflow_dispatch:
 
 permissions:
