@@ -13,6 +13,8 @@ on:
       - .github/workflows/andarium-app.yml
   workflow_dispatch:
 
+# Branch-only trigger: keep main untouched; a workflow-file commit queues this build.
+
 permissions:
   contents: read
 
