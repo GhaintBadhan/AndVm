@@ -94,7 +94,7 @@ jobs:
             -o .build/baseline-inputs/android-kernel.tar.gz
           echo "128d0948d6989e7d1cd03edc5f1c1218d0dd2fac99c7bb960897c64019e38196  .build/baseline-inputs/android-kernel.tar.gz" | shasum -a 256 -c -
           tar -xzf .build/baseline-inputs/android-kernel.tar.gz -C .build/kernel/artifacts
-          test -f .build/kernel/artifacts/android-6.18-arm64-4k-20261119-6.18.60-ca1/manifest.json
+          test -f .build/kernel/artifacts/android-6.18-arm64-4k-20261119-6.18.60-ca1/kernel-artifact.json
 
           curl --fail --location --retry 3 \
             "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29.tar.gz" \
