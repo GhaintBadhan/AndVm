@@ -1,0 +1,156 @@
+name: Andarium baseline iOS build
+
+on:
+  push:
+    branches:
+      - andarium-bugfixes
+    paths:
+      - .github/workflows/andarium-baseline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: andarium-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build unsigned Andarium for iOS device
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - name: Check out untouched baseline
+        uses: actions/checkout@v4
+        with:
+          ref: andarium-bugfixes
+          fetch-depth: 0
+
+      - name: Verify toolchain and configure build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          git config user.name "GitHub Actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 --version
+          df -h /
+
+      - name: Install build tools
+        run: |
+          brew install cmake ninja gettext autoconf automake libtool gperf pkg-config groff
+          echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+          python3 -m venv .build/tools-venv
+          .build/tools-venv/bin/pip install --upgrade pip
+          .build/tools-venv/bin/pip install meson mako pyyaml
+
+      - name: Install Apple Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Prepare pinned dependency sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          dependencies/prepare.sh --product apple-gpu-vulkan-experiment
+          dependencies/prepare.sh --product ios-network
+          dependencies/prepare.sh --product ios-storage
+          dependencies/prepare.sh --product ios-compression
+
+      - name: Build verified iOS dependency prefixes
+        shell: bash
+        env:
+          PATH: ${{ github.workspace }}/.build/tools-venv/bin:${{ env.PATH }}
+          UML_APPLE_GPU_DEPENDENCY_JOBS: "2"
+          UML_IOS_NETWORK_DEPENDENCY_JOBS: "2"
+          UML_IOS_STORAGE_DEPENDENCY_JOBS: "2"
+          UML_IOS_ZSTD_DEPENDENCY_JOBS: "2"
+        run: |
+          set -euo pipefail
+          dependencies/build-apple-gpu.sh --platform ios
+          dependencies/build-ios-network.sh --platform ios
+          dependencies/build-ios-storage.sh
+          dependencies/build-ios-zstd.sh
+
+      - name: Fetch accepted Android kernel and LineageOS release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/kernel/artifacts .build/baseline-inputs
+          curl --fail --location --retry 3 \
+            "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/android-6.18-arm64-4k-20261119-6.18.60-ca1.tar.gz" \
+            -o .build/baseline-inputs/android-kernel.tar.gz
+          echo "128d0948d6989e7d1cd03edc5f1c1218d0dd2fac99c7bb960897c64019e38196  .build/baseline-inputs/android-kernel.tar.gz" | shasum -a 256 -c -
+          tar -xzf .build/baseline-inputs/android-kernel.tar.gz -C .build/kernel/artifacts
+          test -f .build/kernel/artifacts/android-6.18-arm64-4k-20261119-6.18.60-ca1/manifest.json
+
+          curl --fail --location --retry 3 \
+            "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29.tar.gz" \
+            -o .build/baseline-inputs/android-release.tar.gz
+          echo "0d9628d61c9aee094fb433b3a02138fe3071ca7eddc14b93834236188106a460  .build/baseline-inputs/android-release.tar.gz" | shasum -a 256 -c -
+          mkdir -p .build/baseline-inputs/android-release
+          tar -xzf .build/baseline-inputs/android-release.tar.gz -C .build/baseline-inputs/android-release
+          RELEASE_MANIFEST="$(find .build/baseline-inputs/android-release -type f -name release-manifest.json -print -quit)"
+          test -n "$RELEASE_MANIFEST"
+          RELEASE_DIR="$(dirname "$RELEASE_MANIFEST")"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29-aot.tar.gz" \
+            -o .build/baseline-inputs/android-aot.tar.gz
+          echo "bdba3b58c8c7b4ab72a357beb14b21281b9204411ec19d43de3f7bb9b6005175  .build/baseline-inputs/android-aot.tar.gz" | shasum -a 256 -c -
+          mkdir -p .build/baseline-inputs/android-aot
+          tar -xzf .build/baseline-inputs/android-aot.tar.gz -C .build/baseline-inputs/android-aot
+          AOT_MANIFEST="$(find .build/baseline-inputs/android-aot -type f -name artifact.json -print -quit)"
+          test -n "$AOT_MANIFEST"
+          AOT_DIR="$(dirname "$AOT_MANIFEST")"
+
+          android/lineage-24/tools/install-release.py \
+            --source "$RELEASE_DIR" \
+            --aot-artifact "$AOT_DIR"
+
+      - name: Configure, build and package Android runtime
+        shell: bash
+        env:
+          PATH: ${{ github.workspace }}/.build/tools-venv/bin:${{ env.PATH }}
+        run: |
+          set -euo pipefail
+          cmake --preset kernarium-ios-device-android
+          cmake --build --preset kernarium-ios-device-android --parallel 2
+          Kernarium/scripts/package-ios-frameworks.sh --sdk device --runtimes android
+          Andarium/scripts/stage-system-image.py
+          python3 scripts/check-embedded-artifacts.py \
+            --android-release --kernel android --aot
+
+      - name: Build Andarium Release app without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Andarium/Andarium.xcodeproj \
+            -scheme Andarium \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/.build/AndariumDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          APP="$PWD/.build/AndariumDerivedData/Build/Products/Release-iphoneos/Andarium.app"
+          test -d "$APP"
+          python3 scripts/check-embedded-artifacts.py \
+            --android-release --kernel android --aot --app "$APP"
+          mkdir -p .build/ipa/Payload
+          ditto "$APP" .build/ipa/Payload/Andarium.app
+          (cd .build/ipa && ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/Andarium-baseline-unsigned.ipa")
+          shasum -a 256 Andarium-baseline-unsigned.ipa
+          du -sh Andarium-baseline-unsigned.ipa
+
+      - name: Upload unsigned IPA and build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: andarium-baseline-${{ github.run_number }}
+          path: |
+            Andarium-baseline-unsigned.ipa
+            .build/AndariumDerivedData/Logs/Build/**
+          if-no-files-found: warn
+          retention-days: 14
