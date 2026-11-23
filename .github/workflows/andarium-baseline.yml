@@ -119,8 +119,6 @@ jobs:
 
       - name: Configure, build and package Android runtime
         shell: bash
-        env:
-          PATH: ${{ github.workspace }}/.build/tools-venv/bin:${{ env.PATH }}
         run: |
           set -euo pipefail
           cmake --preset kernarium-ios-device-android
