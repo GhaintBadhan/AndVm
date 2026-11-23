@@ -6,6 +6,14 @@ on:
       - andarium-bugfixes
     paths:
       - .github/workflows/andarium-baseline.yml
+      - Andarium/**
+      - Kernarium/**
+      - dependencies/**
+      - CMakeLists.txt
+      - CMakePresets.json
+      - cmake/**
+      - scripts/check-embedded-artifacts.py
+      - Andarium/scripts/stage-system-image.py
       - android/lineage-24/tools/magisk_image.py
       - android/lineage-24/tools/install-release.py
       - android/lineage-24/tools/verify-magisk-boot.py
@@ -60,6 +68,15 @@ jobs:
           .build/tools-venv/bin/pip install --upgrade pip
           .build/tools-venv/bin/pip install meson mako pyyaml
           echo "$GITHUB_WORKSPACE/.build/tools-venv/bin" >> "$GITHUB_PATH"
+
+      # Reuse only compiled iOS dependency prefixes. The build scripts
+      # verify each restored prefix against its pinned source receipt before
+      # accepting it; a toolchain or dependency-input change produces a new key.
+      - name: Restore verified iOS dependency build cache
+        uses: actions/cache@v4
+        with:
+          path: .build/dependencies
+          key: andarium-ios-deps-v1-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('dependencies/manifest.tsv', 'dependencies/platforms/*.tsv', 'dependencies/build-apple-gpu.sh', 'dependencies/build-ios-network.sh', 'dependencies/build-ios-storage.sh', 'dependencies/build-ios-zstd.sh', 'dependencies/build-common.sh', 'dependencies/ios-static-xcframework.sh', 'dependencies/cmake/VerifyAppleGpuPrefix.cmake', 'dependencies/cmake/VerifyIosNetworkPrefix.cmake', 'dependencies/cmake/VerifyIosStorageXCFramework.cmake', 'dependencies/cmake/VerifyIosZstdXCFramework.cmake') }}
 
       - name: Install Apple Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
