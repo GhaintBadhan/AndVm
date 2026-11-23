@@ -4,6 +4,7 @@ import AndariumCore
 import CoreMotion
 import Foundation
 import os
+import ObjectiveC.runtime
 
 private nonisolated struct MotionConnector: GuestStreamOpener {
     func openStream() throws -> Int32 {
@@ -279,8 +280,17 @@ private final class CoreMotionDevice: MotionDevice, @unchecked Sendable {
             magnetometer: manager.isMagnetometerAvailable, deviceMotion: manager.isDeviceMotionAvailable,
             northFrame: { CMMotionManager.availableAttitudeReferenceFrames().contains(.xMagneticNorthZVertical) },
             authorization: {
-                if #available(iOS 27.2, *) { return CMMotionManager.authorizationStatus }
-                return nil
+                // authorizationStatus was added to the iOS 27.2 SDK. Resolve
+                // it dynamically so this source still builds with the 27.1
+                // SDK used by older CI images, while using it when present.
+                let selector = NSSelectorFromString("authorizationStatus")
+                guard let method = class_getClassMethod(CMMotionManager.self, selector) else {
+                    return nil
+                }
+                typealias AuthorizationGetter = @convention(c) (AnyObject, Selector) -> Int
+                let getter = unsafeBitCast(method_getImplementation(method), to: AuthorizationGetter.self)
+                let rawValue = getter(CMMotionManager.self as AnyObject, selector)
+                return CMAuthorizationStatus(rawValue: rawValue)
             })
         // Once, so that a tester's log says whether this iOS states a motion
         // permission and what it was.
