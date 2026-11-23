@@ -10,6 +10,7 @@ on:
       - Andarium/Assets.xcassets/**
       - Andarium/Info.plist
       - Andarium/PrivacyInfo.xcprivacy
+      - .github/workflows/andarium-app.yml
   workflow_dispatch:
 
 permissions:
