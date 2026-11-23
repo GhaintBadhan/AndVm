@@ -1,4 +1,4 @@
-name: Andarium baseline iOS build
+name: Andarium foundation build
 
 on:
   push:
@@ -6,18 +6,15 @@ on:
       - andarium-bugfixes
     paths:
       - .github/workflows/andarium-baseline.yml
-      - Andarium/**
       - Kernarium/**
       - dependencies/**
       - CMakeLists.txt
       - CMakePresets.json
       - cmake/**
+      - kernel/**
       - scripts/check-embedded-artifacts.py
       - Andarium/scripts/stage-system-image.py
-      - android/lineage-24/tools/magisk_image.py
-      - android/lineage-24/tools/install-release.py
-      - android/lineage-24/tools/verify-magisk-boot.py
-      - Andarium/Andarium/Live/MotionSensors.swift
+      - android/lineage-24/**
   workflow_dispatch:
 
 permissions:
@@ -71,14 +68,21 @@ jobs:
           .build/tools-venv/bin/pip install meson mako pyyaml
           echo "$GITHUB_WORKSPACE/.build/tools-venv/bin" >> "$GITHUB_PATH"
 
-      # Reuse only compiled iOS dependency prefixes. The build scripts
-      # verify each restored prefix against its pinned source receipt before
-      # accepting it; a toolchain or dependency-input change produces a new key.
-      - name: Restore verified iOS dependency build cache
+      # One immutable cache holds every verified foundation output needed by
+      # an app-only build. Its fingerprint covers all producers, accepted
+      # Android descriptors, and the exact Xcode toolchain.
+      - name: Restore or publish verified foundation bundle
         uses: actions/cache@v4
         with:
-          path: .build/dependencies
-          key: andarium-ios-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('dependencies/manifest.tsv', 'dependencies/platforms/*.tsv', 'dependencies/build-apple-gpu.sh', 'dependencies/build-ios-network.sh', 'dependencies/build-ios-storage.sh', 'dependencies/build-ios-zstd.sh', 'dependencies/build-common.sh', 'dependencies/ios-static-xcframework.sh', 'dependencies/cmake/VerifyAppleGpuPrefix.cmake', 'dependencies/cmake/VerifyIosNetworkPrefix.cmake', 'dependencies/cmake/VerifyIosStorageXCFramework.cmake', 'dependencies/cmake/VerifyIosZstdXCFramework.cmake') }}
+          path: |
+            .build/dependencies
+            .build/kernel/artifacts
+            .build/android/releases
+            .build/android/aot
+            .build/kernarium-runtime-ios-device-android-4k
+            .build/kernarium-xcframeworks
+            .build/andarium-system
+          key: andarium-foundation-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'Kernarium/**', 'dependencies/**', 'kernel/**', 'android/lineage-24/**', 'scripts/check-embedded-artifacts.py', 'Andarium/scripts/stage-system-image.py') }}
 
       - name: Install Apple Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
@@ -141,9 +145,13 @@ jobs:
           test -n "$AOT_MANIFEST"
           AOT_DIR="$(cd "$(dirname "$AOT_MANIFEST")" && pwd)"
 
-          android/lineage-24/tools/install-release.py \
-            --source "$RELEASE_DIR" \
-            --aot-artifact "$AOT_DIR"
+          if [ ! -d "$PWD/.build/android/releases/lineage24-mainline6.18-4k-20261121-los24-r29" ]; then
+            android/lineage-24/tools/install-release.py \
+              --source "$RELEASE_DIR" \
+              --aot-artifact "$AOT_DIR"
+          else
+            echo "Reusing the already-installed accepted Android release and AOT bundle"
+          fi
 
       - name: Configure, build and package Android runtime
         shell: bash
