@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: andarium-baseline-${{ github.ref }}
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build unsigned Andarium for iOS device
+    name: Build and publish verified Andarium foundation
     runs-on: xcode-27
     timeout-minutes: 360
     steps:
@@ -43,6 +43,7 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           echo "xcode=$(xcodebuild -version | tr '\n' '-')" >> "$GITHUB_OUTPUT"
+          echo "xcode_hash=$(xcodebuild -version | shasum -a 256 | cut -c1-12)" >> "$GITHUB_OUTPUT"
           test "$(uname -m)" = arm64
           git config user.name "GitHub Actions"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -113,17 +114,24 @@ jobs:
           dependencies/build-ios-storage.sh
           dependencies/build-ios-zstd.sh
 
-      - name: Fetch accepted Android kernel and LineageOS release
+      - name: Fetch accepted Android kernel and LineageOS release when missing
         shell: bash
         run: |
           set -euo pipefail
+          KERNEL_DIR=".build/kernel/artifacts/android-6.18-arm64-4k-20261119-6.18.60-ca1"
+          RELEASE_DIR=".build/android/releases/lineage24-mainline6.18-4k-20261121-los24-r29"
+          if [ -f "$KERNEL_DIR/kernel-artifact.json" ] && [ -f "$RELEASE_DIR/release-manifest.json" ] && [ -d .build/android/aot ]; then
+            echo "Reusing restored accepted kernel, Android 17 release and AOT foundation"
+            exit 0
+          fi
+
           mkdir -p .build/kernel/artifacts .build/baseline-inputs
           curl --fail --location --retry 3 \
             "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/android-6.18-arm64-4k-20261119-6.18.60-ca1.tar.gz" \
             -o .build/baseline-inputs/android-kernel.tar.gz
           echo "128d0948d6989e7d1cd03edc5f1c1218d0dd2fac99c7bb960897c64019e38196  .build/baseline-inputs/android-kernel.tar.gz" | shasum -a 256 -c -
           tar -xzf .build/baseline-inputs/android-kernel.tar.gz -C .build/kernel/artifacts
-          test -f .build/kernel/artifacts/android-6.18-arm64-4k-20261119-6.18.60-ca1/kernel-artifact.json
+          test -f "$KERNEL_DIR/kernel-artifact.json"
 
           curl --fail --location --retry 3 \
             "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29.tar.gz" \
@@ -133,7 +141,7 @@ jobs:
           tar -xzf .build/baseline-inputs/android-release.tar.gz -C .build/baseline-inputs/android-release
           RELEASE_MANIFEST="$(find .build/baseline-inputs/android-release -type f -name release-manifest.json -print -quit)"
           test -n "$RELEASE_MANIFEST"
-          RELEASE_DIR="$(cd "$(dirname "$RELEASE_MANIFEST")" && pwd)"
+          RELEASE_SOURCE="$(cd "$(dirname "$RELEASE_MANIFEST")" && pwd)"
 
           curl --fail --location --retry 3 \
             "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29-aot.tar.gz" \
@@ -143,15 +151,13 @@ jobs:
           tar -xzf .build/baseline-inputs/android-aot.tar.gz -C .build/baseline-inputs/android-aot
           AOT_MANIFEST="$(find .build/baseline-inputs/android-aot -type f -name artifact.json -print -quit)"
           test -n "$AOT_MANIFEST"
-          AOT_DIR="$(cd "$(dirname "$AOT_MANIFEST")" && pwd)"
+          AOT_SOURCE="$(cd "$(dirname "$AOT_MANIFEST")" && pwd)"
 
-          if [ ! -d "$PWD/.build/android/releases/lineage24-mainline6.18-4k-20261121-los24-r29" ]; then
-            android/lineage-24/tools/install-release.py \
-              --source "$RELEASE_DIR" \
-              --aot-artifact "$AOT_DIR"
-          else
-            echo "Reusing the already-installed accepted Android release and AOT bundle"
-          fi
+          rm -rf .build/android/releases/lineage24-mainline6.18-4k-20261121-los24-r29 .build/android/aot
+          android/lineage-24/tools/install-release.py \
+            --source "$RELEASE_SOURCE" \
+            --aot-artifact "$AOT_SOURCE"
+          rm -rf .build/baseline-inputs
 
       - name: Configure, build and package Android runtime
         shell: bash
@@ -164,35 +170,54 @@ jobs:
           python3 scripts/check-embedded-artifacts.py \
             --android-release --kernel android --aot
 
-      - name: Build Andarium Release app without signing
+      - name: Publish verified foundation as versioned repository release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FOUNDATION_SOURCE_HASH: ${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'Kernarium/**', 'dependencies/**', 'kernel/**', 'android/lineage-24/**', 'scripts/check-embedded-artifacts.py', 'Andarium/scripts/stage-system-image.py') }}
+          XCODE_HASH: ${{ steps.toolchain.outputs.xcode_hash }}
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project Andarium/Andarium.xcodeproj \
-            -scheme Andarium \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "$PWD/.build/AndariumDerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-          APP="$PWD/.build/AndariumDerivedData/Build/Products/Release-iphoneos/Andarium.app"
-          test -d "$APP"
-          python3 scripts/check-embedded-artifacts.py \
-            --android-release --kernel android --aot --app "$APP"
-          mkdir -p .build/ipa/Payload
-          ditto "$APP" .build/ipa/Payload/Andarium.app
-          (cd .build/ipa && ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/Andarium-baseline-unsigned.ipa")
-          shasum -a 256 Andarium-baseline-unsigned.ipa
-          du -sh Andarium-baseline-unsigned.ipa
+          for path in \
+            .build/dependencies \
+            .build/kernel/artifacts \
+            .build/android/releases \
+            .build/android/aot \
+            .build/kernarium-runtime-ios-device-android-4k \
+            .build/kernarium-xcframeworks \
+            .build/andarium-system; do
+            test -d "$path"
+          done
 
-      - name: Upload unsigned IPA and build evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: andarium-baseline-${{ github.run_number }}
-          path: |
-            Andarium-baseline-unsigned.ipa
-            .build/AndariumDerivedData/Logs/Build/**
-          if-no-files-found: warn
-          retention-days: 14
+          TAG="andarium-foundation-${XCODE_HASH}-${FOUNDATION_SOURCE_HASH}"
+          mkdir -p .build/foundation-bundle
+          tar -czf .build/foundation-bundle/andarium-foundation.tar.gz \
+            .build/dependencies \
+            .build/kernel/artifacts \
+            .build/android/releases \
+            .build/android/aot \
+            .build/kernarium-runtime-ios-device-android-4k \
+            .build/kernarium-xcframeworks \
+            .build/andarium-system
+
+          # Keep every individual release asset below 1.5 GiB.
+          split -b 1500m -d -a 3 \
+            .build/foundation-bundle/andarium-foundation.tar.gz \
+            .build/foundation-bundle/andarium-foundation.tar.gz.part-
+          cd .build/foundation-bundle
+          shasum -a 256 andarium-foundation.tar.gz.part-* > SHA256SUMS
+          shasum -a 256 andarium-foundation.tar.gz > archive.sha256
+          printf '{\n  "schema": 1,\n  "tag": "%s",\n  "source_hash": "%s",\n  "xcode_hash": "%s",\n  "source_commit": "%s"\n}\n' \
+            "$TAG" "$FOUNDATION_SOURCE_HASH" "$XCODE_HASH" "$GITHUB_SHA" > manifest.json
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" ./* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" ./* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Andarium foundation ${FOUNDATION_SOURCE_HASH:0:12}" \
+              --notes "Verified reusable Andarium foundation. Source fingerprint: $FOUNDATION_SOURCE_HASH. Xcode fingerprint: $XCODE_HASH. Assets are checksum-verified and split into sub-1.5-GiB parts." \
+              --target "$GITHUB_SHA"
+          fi
+          echo "Published foundation release: $TAG"
+
