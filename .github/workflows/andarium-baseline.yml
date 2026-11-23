@@ -40,10 +40,12 @@ jobs:
           fetch-depth: 0
 
       - name: Verify toolchain and configure build identity
+        id: toolchain
         shell: bash
         run: |
           set -euo pipefail
           xcodebuild -version
+          echo "xcode=$(xcodebuild -version | tr '\n' '-')" >> "$GITHUB_OUTPUT"
           test "$(uname -m)" = arm64
           git config user.name "GitHub Actions"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -76,7 +78,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build/dependencies
-          key: andarium-ios-deps-v1-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('dependencies/manifest.tsv', 'dependencies/platforms/*.tsv', 'dependencies/build-apple-gpu.sh', 'dependencies/build-ios-network.sh', 'dependencies/build-ios-storage.sh', 'dependencies/build-ios-zstd.sh', 'dependencies/build-common.sh', 'dependencies/ios-static-xcframework.sh', 'dependencies/cmake/VerifyAppleGpuPrefix.cmake', 'dependencies/cmake/VerifyIosNetworkPrefix.cmake', 'dependencies/cmake/VerifyIosStorageXCFramework.cmake', 'dependencies/cmake/VerifyIosZstdXCFramework.cmake') }}
+          key: andarium-ios-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('dependencies/manifest.tsv', 'dependencies/platforms/*.tsv', 'dependencies/build-apple-gpu.sh', 'dependencies/build-ios-network.sh', 'dependencies/build-ios-storage.sh', 'dependencies/build-ios-zstd.sh', 'dependencies/build-common.sh', 'dependencies/ios-static-xcframework.sh', 'dependencies/cmake/VerifyAppleGpuPrefix.cmake', 'dependencies/cmake/VerifyIosNetworkPrefix.cmake', 'dependencies/cmake/VerifyIosStorageXCFramework.cmake', 'dependencies/cmake/VerifyIosZstdXCFramework.cmake') }}
 
       - name: Install Apple Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
