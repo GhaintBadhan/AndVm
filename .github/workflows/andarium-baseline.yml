@@ -212,6 +212,11 @@ jobs:
             "$TAG" "$FOUNDATION_SOURCE_HASH" "$XCODE_HASH" "$GITHUB_SHA" > manifest.json
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Remove the pre-split archive if an earlier interrupted attempt
+            # uploaded it; the release stores only the bounded-size parts.
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "andarium-foundation.tar.gz"; then
+              gh release delete-asset "$TAG" andarium-foundation.tar.gz --repo "$GITHUB_REPOSITORY" --yes
+            fi
             gh release upload "$TAG" ./* --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$TAG" ./* \
