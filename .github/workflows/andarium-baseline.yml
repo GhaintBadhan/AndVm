@@ -6,6 +6,7 @@ on:
       - andarium-bugfixes
     paths:
       - .github/workflows/andarium-baseline.yml
+      - android/lineage-24/tools/magisk_image.py
   workflow_dispatch:
 
 permissions:
