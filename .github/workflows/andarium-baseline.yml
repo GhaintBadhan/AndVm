@@ -104,7 +104,7 @@ jobs:
           tar -xzf .build/baseline-inputs/android-release.tar.gz -C .build/baseline-inputs/android-release
           RELEASE_MANIFEST="$(find .build/baseline-inputs/android-release -type f -name release-manifest.json -print -quit)"
           test -n "$RELEASE_MANIFEST"
-          RELEASE_DIR="$(dirname "$RELEASE_MANIFEST")"
+          RELEASE_DIR="$(cd "$(dirname "$RELEASE_MANIFEST")" && pwd)"
 
           curl --fail --location --retry 3 \
             "https://github.com/imxieyi/Kernarium/releases/download/andarium-1.1/lineage24-mainline6.18-4k-20261121-los24-r29-aot.tar.gz" \
@@ -114,7 +114,7 @@ jobs:
           tar -xzf .build/baseline-inputs/android-aot.tar.gz -C .build/baseline-inputs/android-aot
           AOT_MANIFEST="$(find .build/baseline-inputs/android-aot -type f -name artifact.json -print -quit)"
           test -n "$AOT_MANIFEST"
-          AOT_DIR="$(dirname "$AOT_MANIFEST")"
+          AOT_DIR="$(cd "$(dirname "$AOT_MANIFEST")" && pwd)"
 
           android/lineage-24/tools/install-release.py \
             --source "$RELEASE_DIR" \
