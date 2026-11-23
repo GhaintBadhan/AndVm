@@ -38,13 +38,22 @@ jobs:
           python3 --version
           df -h /
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install build tools
+        shell: bash
         run: |
+          set -euo pipefail
           brew install cmake ninja gettext autoconf automake libtool gperf pkg-config groff
           echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+          mkdir -p .build
           python3 -m venv .build/tools-venv
           .build/tools-venv/bin/pip install --upgrade pip
           .build/tools-venv/bin/pip install meson mako pyyaml
+          echo "$GITHUB_WORKSPACE/.build/tools-venv/bin" >> "$GITHUB_PATH"
 
       - name: Install Apple Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
@@ -61,7 +70,6 @@ jobs:
       - name: Build verified iOS dependency prefixes
         shell: bash
         env:
-          PATH: ${{ github.workspace }}/.build/tools-venv/bin:${{ env.PATH }}
           UML_APPLE_GPU_DEPENDENCY_JOBS: "2"
           UML_IOS_NETWORK_DEPENDENCY_JOBS: "2"
           UML_IOS_STORAGE_DEPENDENCY_JOBS: "2"
